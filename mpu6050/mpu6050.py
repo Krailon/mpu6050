@@ -9,6 +9,19 @@ https://github.com/m-rtijn/mpu6050
 """
 
 import smbus
+from enum import IntEnum
+
+
+class CLKSEL(IntEnum):
+    INTERN_8MHZ  = 0
+    PLL_X_GYRO   = 1
+    PLL_Y_GYRO   = 2
+    PLL_Z_GYRO   = 3
+    EXTERN_32KHZ = 4
+    EXTERN_19MHZ = 5
+    # 6 is reserved
+    STOP_CLOCK   = 7
+
 
 class mpu6050:
 
@@ -65,8 +78,9 @@ class mpu6050:
     GYRO_CONFIG = 0x1B
     MPU_CONFIG = 0x1A
 
-    # Register value bit masks
+    # Register field bit masks
     SLEEP_MODE = 1 << 6
+    CLOCK_SEL = 0b111
 
     def __init__(self, address, bus=1):
         self.address = address
@@ -80,17 +94,23 @@ class mpu6050:
 
     @property
     def asleep(self) -> bool:
-        return self.bus.read_byte_data(self.address, self.PWR_MGMT_1) & self.SLEEP_MODE == self.SLEEP_MODE
+        return self.get_register_field(self.PWR_MGMT_1, self.SLEEP_MODE) == self.SLEEP_MODE
+        #return self.bus.read_byte_data(self.address, self.PWR_MGMT_1) & self.SLEEP_MODE == self.SLEEP_MODE
 
     def get_register(self, reg_addr: int) -> int:
         return self.bus.read_byte_data(self.address, reg_addr)
 
+    def get_register_field(self, reg_addr: int, field_mask: int) -> int:
+        reg_val = self.get_register(reg_addr)
+
+        return reg_val & field_mask
+
     # I2C communication methods
 
     def wake(self) -> bool:
-        pwr_mgmt_1_val = self.get_register(PWR_MGMT_1)
+        pwr_mgmt_1_val = self.get_register(self.PWR_MGMT_1)
         if pwr_mgmt_1_val & self.SLEEP_MODE == self.SLEEP_MODE:
-            self.bus.write_byte_data(self.address, self.PWR_MGMT_1,  pwr_mgmt_1_val ^ SLEEP_MODE)
+            self.bus.write_byte_data(self.address, self.PWR_MGMT_1,  pwr_mgmt_1_val ^ self.SLEEP_MODE)
             return True
         else:
             return False  # Already awake
@@ -98,10 +118,23 @@ class mpu6050:
     def sleep(self) -> bool:
         pwr_mgmt_1_val = self.get_register(self.PWR_MGMT_1)
         if pwr_mgmt_1_val & self.SLEEP_MODE == 0:
-            self.bus.write_byte_data(self.address, self.PWR_MGMT_1, pwr_mgmt_1_val | SLEEP_MODE)
+            self.bus.write_byte_data(self.address, self.PWR_MGMT_1, pwr_mgmt_1_val | self.SLEEP_MODE)
             return True
         else:
             return False  # Already asleep
+
+    def get_clock(self) -> CLKSEL:
+        clk = self.get_register_field(self.PWR_MGMT_1, self.CLOCK_SEL)
+
+        return CLKSEL(clk)
+
+    def set_clock(self, new_clock: CLKSEL) -> bool:
+        pwr_mgmt_1_val = self.get_register(self.PWR_MGMT_1)
+        if pwr_mgmt_1_val & self.CLOCK_SEL != new_clock:
+            pwr_mgmt_1_val = (pwr_mgmt_1_val & 0b11111000) | new_clock
+            return True
+        else:
+            return False  # Clock mode already set as specified
 
     def read_i2c_word(self, register):
         """Read two i2c registers and combine them.
