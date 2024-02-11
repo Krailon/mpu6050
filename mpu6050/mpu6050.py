@@ -65,13 +65,43 @@ class mpu6050:
     GYRO_CONFIG = 0x1B
     MPU_CONFIG = 0x1A
 
+    # Register value bit masks
+    SLEEP_MODE = 1 << 6
+
     def __init__(self, address, bus=1):
         self.address = address
         self.bus = smbus.SMBus(bus)
+
         # Wake up the MPU-6050 since it starts in sleep mode
-        self.bus.write_byte_data(self.address, self.PWR_MGMT_1, 0x00)
+        self.wake()
+
+    def __del__(self):
+        self.sleep()
+
+    @property
+    def asleep(self) -> bool:
+        return self.bus.read_byte_data(self.address, self.PWR_MGMT_1) & self.SLEEP_MODE == self.SLEEP_MODE
+
+    def get_register(self, reg_addr: int) -> int:
+        return self.bus.read_byte_data(self.address, reg_addr)
 
     # I2C communication methods
+
+    def wake(self) -> bool:
+        pwr_mgmt_1_val = self.get_register(PWR_MGMT_1)
+        if pwr_mgmt_1_val & self.SLEEP_MODE == self.SLEEP_MODE:
+            self.bus.write_byte_data(self.address, self.PWR_MGMT_1,  pwr_mgmt_1_val ^ SLEEP_MODE)
+            return True
+        else:
+            return False  # Already awake
+
+    def sleep(self) -> bool:
+        pwr_mgmt_1_val = self.get_register(self.PWR_MGMT_1)
+        if pwr_mgmt_1_val & self.SLEEP_MODE == 0:
+            self.bus.write_byte_data(self.address, self.PWR_MGMT_1, pwr_mgmt_1_val | SLEEP_MODE)
+            return True
+        else:
+            return False  # Already asleep
 
     def read_i2c_word(self, register):
         """Read two i2c registers and combine them.
